@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c110e">
+<title>CARP LIFE</title>
+<style>
+:root{--bg:#0c110e;--s1:#141b16;--s2:#1d2820;--line:#2a382d;--fg:#e6ece6;--mu:#8a9b8d;--g:#8fbf6a;--g2:#2f6b3f;--am:#d9a441;--rd:#d86a5a}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding:env(safe-area-inset-top) 0 calc(64px + env(safe-area-inset-bottom))}
+header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px 6px}
+h1{font:700 20px Georgia,serif;margin:0;letter-spacing:.5px}
+h2{font:600 16px Georgia,serif;margin:0 0 8px}
+main{padding:0 14px;max-width:760px;margin:0 auto}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
+.mu{color:var(--mu);font-size:13px}
+button,select,input{font:inherit;color:var(--fg);background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+button{cursor:pointer}button.p{background:var(--g2);border-color:var(--g2)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--g)}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#0f1612;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;border-radius:0;background:none;padding:14px 4px;color:var(--mu)}
+nav button.on{color:var(--g);box-shadow:inset 0 2px 0 var(--g)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.hero{display:flex;gap:16px;align-items:center}
+.ring{width:118px;height:118px;flex:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.kv{background:var(--s2);border-radius:10px;padding:10px}.kv b{display:block;font-size:19px}
+.why{list-style:none;padding:0;margin:8px 0 0}
+.why li{padding:6px 0;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:space-between}
+.pos{color:var(--g)}.neg{color:var(--rd)}.neu{color:var(--mu)}
+.tag{font-size:11px;color:var(--mu);border:1px solid var(--line);border-radius:6px;padding:0 5px;white-space:nowrap}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}
+tr.day td{background:var(--s2);color:var(--g);font-weight:600;text-align:left}
+.slot{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+.msg{padding:12px;border-radius:10px;background:#2a2314;border:1px solid #5a4818;margin:10px 0}
+.hide{display:none}
+svg text{fill:var(--mu);font-size:10px}
+@media (prefers-reduced-motion:no-preference){.ring circle.v{transition:stroke-dasharray .6s}}
+</style>
+</head>
+<body>
+<header><h1>CARP LIFE</h1><div class="row"><button id="bgps" class="p">Ma position</button><button id="bplace">Lieu</button></div></header>
+<main>
+<div id="place" class="mu" style="padding:0 2px 4px">Aucune position.</div>
+<div id="msg" class="msg hide"></div>
+<section id="v-home"></section>
+<section id="v-wx" class="hide"></section>
+<section id="v-pm" class="hide"></section>
+<div id="dlg" class="card hide">
+ <h2>Choisir un lieu</h2>
+ <div class="row"><input id="q" placeholder="Ville ou plan d'eau" style="flex:1"><button id="qgo" class="p">Chercher</button></div>
+ <div id="res"></div>
+ <h2 style="margin-top:12px">Favoris</h2><div id="favs" class="mu">Aucun favori.</div>
+</div>
+</main>
+<nav><button data-v="home" class="on">Accueil</button><button data-v="wx">Météo</button><button data-v="pm">Pression et lune</button></nav>
+<script>
+const $=s=>document.querySelector(s);
+const store={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let loc=store.get('cl_loc',null),W=null,range=48;
+const DIRS=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
+const dir=d=>DIRS[Math.round(d/22.5)%16];
+const f1=n=>n==null?'n.d.':(Math.round(n*10)/10).toString().replace('.',',');
+const fmtH=t=>t.slice(11,16), DJ=['dim','lun','mar','mer','jeu','ven','sam'];
+const dayLbl=t=>{const d=new Date(t.slice(0,10)+'T12:00');return DJ[d.getDay()]+' '+t.slice(8,10)+'/'+t.slice(5,7)};
+function msg(t){const m=$('#msg');m.textContent=t||'';m.classList.toggle('hide',!t)}
+
+/* ---- Lune (calcul local) ---- */
+const SYN=29.530588853, REF=Date.UTC(2000,0,6,18,14)/864e5;
+const moonAge=d=>{let a=((d.getTime()/864e5-REF)%SYN+SYN)%SYN;return a};
+const moonIll=a=>(1-Math.cos(2*Math.PI*a/SYN))/2;
+function moonName(a){const p=a/SYN*8;return ['Nouvelle lune','Premier croissant','Premier quartier','Gibbeuse croissante','Pleine lune','Gibbeuse décroissante','Dernier quartier','Dernier croissant'][Math.round(p)%8]}
+function nextPhase(target){const now=new Date();let a=moonAge(now),d=((target-a)%SYN+SYN)%SYN;return new Date(now.getTime()+d*864e5)}
+const fd=d=>d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+
+/* ---- Données ---- */
+async function load(){
+  if(!loc)return;
+  $('#place').textContent=loc.name+' ('+loc.lat.toFixed(3)+', '+loc.lon.toFixed(3)+')';
+  msg('');
+  const u='https://api.open-meteo.com/v1/forecast?latitude='+loc.lat+'&longitude='+loc.lon+
+  '&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m'+
+  '&hourly=temperature_2m,precipitation,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index'+
+  '&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,uv_index_max,sunshine_duration'+
+  '&past_days=7&forecast_days=7&timezone=auto&wind_speed_unit=kmh';
+  try{
+    const r=await fetch(u);if(!r.ok)throw new Error(r.status);
+    W=await r.json();render();
+  }catch(e){
+    W=null;render();
+    msg("Impossible de charger la météo (Open-Meteo). Vérifie ta connexion. Si tu ouvres cette page depuis un aperçu intégré, télécharge-la et ouvre-la dans Chrome.");
+  }
+}
+const nowIdx=()=>W.hourly.time.indexOf(W.current.time.slice(0,13)+':00');
+
+/* ---- Indice d'activité ---- */
+function hourScore(i){
+  const H=W.hourly,R=[],P=H.pressure_msl;let s=50;
+  const add=(pts,txt,tag)=>{s+=pts;R.push({pts,txt,tag})};
+  if(i>=24&&P[i]!=null&&P[i-24]!=null){
+    const d=P[i]-P[i-24];
+    if(Math.abs(d)<3)add(8,'Pression stable ('+f1(d)+' hPa/24 h)','carpistes');
+    else if(d<=-3&&d>=-8)add(12,'Baisse modérée de pression ('+f1(d)+' hPa/24 h)','carpistes');
+    else if(d<-8)add(-10,'Chute rapide de pression ('+f1(d)+' hPa/24 h)','carpistes');
+    else if(d>=8)add(-8,'Forte hausse de pression (+'+f1(d)+' hPa/24 h)','carpistes');
+    else add(0,'Hausse modérée de pression (+'+f1(d)+' hPa/24 h)','carpistes');
+  }
+  const t=H.temperature_2m[i];
+  if(t!=null){
+    if(t>=12&&t<=24)add(14,'Température de l\'air favorable ('+f1(t)+' °C)','physiologie');
+    else if((t>=8&&t<12)||(t>24&&t<=28))add(4,'Température acceptable ('+f1(t)+' °C)','physiologie');
+    else add(-14,'Température défavorable ('+f1(t)+' °C) : métabolisme ralenti ou stress thermique','physiologie');
+  }
+  const w=H.wind_speed_10m[i];
+  if(w!=null){
+    if(w>=8&&w<=25)add(8,'Vent modéré ('+f1(w)+' km/h)','carpistes');
+    else if(w>40)add(-14,'Vent fort ('+f1(w)+' km/h)','carpistes');
+    else add(0,'Vent faible ou assez soutenu ('+f1(w)+' km/h)','carpistes');
+  }
+  const p=H.precipitation[i];
+  if(p>3)add(-6,'Pluie forte ('+f1(p)+' mm/h)','carpistes');else if(p>0)add(3,'Pluie légère ('+f1(p)+' mm/h)','carpistes');
+  const c=H.cloud_cover[i];
+  if(c!=null&&c>=40)add(4,'Ciel couvert à '+c+' %','carpistes');
+  const m=+H.time[i].slice(5,7);
+  if([3,4,5,9,10,11].includes(m))add(5,'Saison de transition','carpistes');else if([12,1,2].includes(m))add(-5,'Saison froide','physiologie');
+  // aube / crépuscule
+  const day=H.time[i].slice(0,10),di=W.daily.time.indexOf(day);
+  if(di>=0){const T=x=>new Date(x).getTime(),ht=T(H.time[i]),near=[W.daily.sunrise[di],W.daily.sunset[di]].some(x=>Math.abs(T(x)-ht)<=5400000);
+    if(near)add(8,'Proche du lever ou du coucher du soleil','carpistes')}
+  return{score:Math.max(0,Math.min(100,Math.round(s))),R};
+}
+const label=s=>s<=20?'Conditions peu intéressantes':s<=40?'Peu favorables':s<=60?'Intermédiaires':s<=80?'Intéressantes':'Particulièrement intéressantes';
+const colorOf=s=>s<=40?'var(--rd)':s<=60?'var(--am)':'var(--g)';
+
+/* ---- Rendu ---- */
+function ring(s){const c=2*Math.PI*48,a=c*s/100;
+ return '<svg class="ring" viewBox="0 0 120 120" role="img" aria-label="Indice '+s+' sur 100"><circle cx="60" cy="60" r="48" fill="none" stroke="var(--s2)" stroke-width="10"/><circle class="v" cx="60" cy="60" r="48" fill="none" stroke="'+colorOf(s)+'" stroke-width="10" stroke-linecap="round" stroke-dasharray="'+a+' '+c+'" transform="rotate(-90 60 60)"/><text x="60" y="66" text-anchor="middle" style="font:700 30px Georgia,serif;fill:var(--fg)">'+s+'</text></svg>'}
+function render(){renderHome();renderWx();renderPm()}
+function empty(id,t){$(id).innerHTML='<div class="card mu">'+t+'</div>'}
+function renderHome(){
+  if(!W)return empty('#v-home',loc?'Chargement…':'Appuie sur « Ma position » ou choisis un lieu pour voir les conditions.');
+  const i=nowIdx(),cur=W.current,{score,R}=hourScore(i);
+  // créneaux 72 h
+  const sl=[];for(let k=i;k<i+72&&k<W.hourly.time.length;k++)sl.push({k,s:hourScore(k).score});
+  const best=[];[...sl].sort((a,b)=>b.s-a.s).forEach(x=>{if(best.length<5&&best.every(b=>Math.abs(b.k-x.k)>=4))best.push(x)});
+  best.sort((a,b)=>a.k-b.k);
+  $('#v-home').innerHTML=
+  '<div class="card"><div class="hero">'+ring(score)+'<div><h2>'+label(score)+'</h2><div class="mu">Indice CARP LIFE estimé pour maintenant. Ce n\'est pas une probabilité de capture.</div></div></div>'+
+  '<ul class="why">'+R.map(r=>'<li><span class="'+(r.pts>0?'pos':r.pts<0?'neg':'neu')+'">'+(r.pts>0?'+':'')+r.pts+'</span><span style="flex:1">'+r.txt+'</span><span class="tag">'+(r.tag==='physiologie'?'base biologique':'observation de carpistes')+'</span></li>').join('')+'</ul>'+
+  '<p class="mu">Base 50 points, ajustée par chaque facteur. Les règles sont des hypothèses de départ : elles seront recalibrées avec tes captures (versions suivantes).</p></div>'+
+  '<div class="card"><h2>Meilleurs créneaux, 72 prochaines heures</h2>'+best.map(b=>'<div class="slot"><span>'+dayLbl(W.hourly.time[b.k])+' à '+fmtH(W.hourly.time[b.k])+'</span><b style="color:'+colorOf(b.s)+'">'+b.s+'</b></div>').join('')+'</div>'+
+  '<div class="card"><h2>Maintenant</h2><div class="grid">'+
+  kv('Pression',f1(cur.pressure_msl)+' hPa')+kv('Température',f1(cur.temperature_2m)+' °C')+kv('Vent',f1(cur.wind_speed_10m)+' km/h '+dir(cur.wind_direction_10m))+kv('Rafales',f1(cur.wind_gusts_10m)+' km/h')+'</div></div>';
+}
+const kv=(a,b)=>'<div class="kv"><span class="mu">'+a+'</span><b>'+b+'</b></div>';
+function renderWx(){
+  if(!W)return empty('#v-wx','Aucune donnée météo.');
+  const c=W.current,H=W.hourly,i=nowIdx(),D=W.daily;
+  const pd=(h)=>i>=h&&H.pressure_msl[i-h]!=null?(c.pressure_msl-H.pressure_msl[i-h]):null;
+  const sg=n=>n==null?'n.d.':(n>0?'+':'')+f1(n);
+  const di=D.time.indexOf(c.time.slice(0,10));
+  let rows='',last='';
+  for(let k=i;k<Math.min(i+72,H.time.length);k++){const d=H.time[k].slice(0,10);
+    if(d!==last){rows+='<tr class="day"><td colspan="7">'+dayLbl(H.time[k])+'</td></tr>';last=d}
+    rows+='<tr><td>'+fmtH(H.time[k])+'</td><td>'+f1(H.temperature_2m[k])+'°</td><td>'+f1(H.pressure_msl[k])+'</td><td>'+f1(H.wind_speed_10m[k])+' '+dir(H.wind_direction_10m[k])+'</td><td>'+f1(H.wind_gusts_10m[k])+'</td><td>'+f1(H.precipitation[k])+'</td><td>'+H.cloud_cover[k]+'%</td></tr>'}
+  let days='';
+  for(let k=7;k<D.time.length;k++)days+='<tr><td>'+dayLbl(D.time[k])+'</td><td>'+f1(D.temperature_2m_min[k])+' / '+f1(D.temperature_2m_max[k])+'°</td><td>'+f1(D.precipitation_sum[k])+' mm</td><td>'+f1(D.wind_speed_10m_max[k])+' km/h</td><td>'+f1(D.uv_index_max[k])+'</td><td>'+f1(D.sunshine_duration[k]/3600)+' h</td><td>'+fmtH(D.sunrise[k])+'-'+fmtH(D.sunset[k])+'</td></tr>';
+  $('#v-wx').innerHTML=
+  '<div class="card"><h2>Conditions actuelles</h2><div class="grid">'+
+  kv('Température',f1(c.temperature_2m)+' °C')+kv('Ressentie',f1(c.apparent_temperature)+' °C')+kv('Pression',f1(c.pressure_msl)+' hPa')+
+  kv('Pression 3 h',sg(pd(3))+' hPa')+kv('Pression 24 h',sg(pd(24))+' hPa')+
+  kv('Vent',f1(c.wind_speed_10m)+' km/h '+dir(c.wind_direction_10m))+kv('Rafales',f1(c.wind_gusts_10m)+' km/h')+kv('Pluie',f1(c.precipitation)+' mm')+
+  kv('Humidité',c.relative_humidity_2m+' %')+kv('Nuages',c.cloud_cover+' %')+kv('Indice UV',f1(H.uv_index[i]))+
+  kv('Soleil',di>=0?fmtH(D.sunrise[di])+' - '+fmtH(D.sunset[di]):'n.d.')+'</div>'+
+  '<p class="mu">Source : Open-Meteo (modèles météo nationaux). Heures locales du lieu.</p></div>'+
+  '<div class="card"><h2>Courbes, 72 h</h2>'+[['Température (°C)','temperature_2m'],['Vent moyen (km/h)','wind_speed_10m'],['Rafales (km/h)','wind_gusts_10m'],['Pluie (mm/h)','precipitation'],['Nuages (%)','cloud_cover']].map(m=>'<div class="mu" style="margin-top:8px">'+m[0]+'</div>'+chart(H[m[1]].slice(i,i+73),H.time.slice(i,i+73),0)).join('')+'</div>'+
+  '<div class="card"><h2>Heure par heure, 72 h</h2><div class="scroll" style="max-height:380px;overflow-y:auto"><table><tr><th>Heure</th><th>Temp.</th><th>hPa</th><th>Vent km/h</th><th>Raf.</th><th>mm</th><th>Nuages</th></tr>'+rows+'</table></div></div>'+
+  '<div class="card"><h2>7 jours</h2><div class="scroll"><table><tr><th>Jour</th><th>Min / max</th><th>Pluie</th><th>Vent max</th><th>UV</th><th>Ensoleil.</th><th>Lever-coucher</th></tr>'+days+'</table></div></div>';
+}
+function chart(vals,times,i0,n){
+  const w=340,h=170,pl=34,pr=8,pt=10,pb=22,xs=vals.slice(),vv=xs.filter(v=>v!=null);
+  const mn=Math.floor(Math.min(...vv)-1),mx=Math.ceil(Math.max(...vv)+1),X=k=>pl+(w-pl-pr)*k/(xs.length-1),Y=v=>pt+(h-pt-pb)*(1-(v-mn)/(mx-mn));
+  const pts=(a,b)=>xs.slice(a,b).map((v,k)=>v==null?'':(X(a+k)+','+Y(v))).filter(Boolean).join(' ');
+  let g='';for(let t=0;t<=3;t++){const v=mn+(mx-mn)*t/3;g+='<line x1="'+pl+'" x2="'+(w-pr)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="var(--line)"/><text x="2" y="'+(Y(v)+3)+'">'+Math.round(v)+'</text>'}
+  const step=Math.max(1,Math.round(xs.length/4));let lb='';for(let k=0;k<xs.length;k+=step)lb+='<text x="'+X(k)+'" y="'+(h-6)+'" text-anchor="middle">'+times[k].slice(8,10)+'/'+times[k].slice(5,7)+' '+times[k].slice(11,13)+'h</text>';
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" role="img" aria-label="Courbe de pression">'+g+lb+'<polyline points="'+pts(0,i0+1)+'" fill="none" stroke="var(--g)" stroke-width="2"/><polyline points="'+pts(i0,xs.length)+'" fill="none" stroke="var(--g)" stroke-width="2" stroke-dasharray="4 3" opacity=".7"/><line x1="'+X(i0)+'" x2="'+X(i0)+'" y1="'+pt+'" y2="'+(h-pb)+'" stroke="var(--am)"/><text x="'+(X(i0)+3)+'" y="'+(pt+8)+'" style="fill:var(--am)">maintenant</text></svg>';
+}
+function renderPm(){
+  const now=new Date(),a=moonAge(now),il=moonIll(a);
+  const moon='<div class="card"><h2>Lune</h2><div class="grid">'+kv('Phase',moonName(a))+kv('Illumination',Math.round(il*100)+' %')+kv('Âge',f1(a)+' j')+'</div>'+
+  '<div class="slot"><span>Prochaine nouvelle lune</span><b>'+fd(nextPhase(0))+'</b></div><div class="slot"><span>Premier quartier</span><b>'+fd(nextPhase(SYN/4))+'</b></div><div class="slot"><span>Prochaine pleine lune</span><b>'+fd(nextPhase(SYN/2))+'</b></div><div class="slot"><span>Dernier quartier</span><b>'+fd(nextPhase(SYN*3/4))+'</b></div>'+
+  '<p class="mu">Calcul astronomique local, précision d\'environ une demi-journée sur les dates de phase. Lever/coucher de lune, périgée et apogée : à venir.</p></div>';
+  if(!W){$('#v-pm').innerHTML=empty0('Aucune donnée de pression.')+moon;return}
+  const H=W.hourly,i=nowIdx(),a0=Math.max(0,i-range),b0=Math.min(H.time.length,i+73);
+  const vals=H.pressure_msl.slice(a0,b0),times=H.time.slice(a0,b0),ii=i-a0;
+  const d3=i>=3?W.current.pressure_msl-H.pressure_msl[i-3]:null,rate=d3==null?'n.d.':(d3>=0?'+':'')+f1(d3/3)+' hPa/h';
+  const past=H.pressure_msl.slice(a0,i+1).filter(v=>v!=null),hi=Math.max(...past),lo=Math.min(...past);
+  const tend=d3==null?'n.d.':Math.abs(d3)<1?'Stable':d3<0?'En baisse':'En hausse';
+  $('#v-pm').innerHTML='<div class="card"><h2>Pression atmosphérique</h2><div class="grid">'+kv('Actuelle',f1(W.current.pressure_msl)+' hPa')+kv('Tendance 3 h',tend)+kv('Vitesse',rate)+kv('Max / min',Math.round(hi)+' / '+Math.round(lo))+'</div>'+
+  '<div class="row" style="margin:10px 0">'+[24,48,168].map(r=>'<button data-r="'+r+'" class="'+(r===range?'p':'')+'">'+(r===168?'7 jours':r+' h')+' passés</button>').join('')+'</div>'+chart(vals,times,ii)+
+  '<p class="mu">Trait plein : mesuré ou analysé. Pointillés : prévision à 72 h. Pression au niveau de la mer (Open-Meteo).</p></div>'+moon;
+  document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{range=+b.dataset.r;renderPm()});
+}
+const empty0=t=>'<div class="card mu">'+t+'</div>';
+
+/* ---- Lieux ---- */
+function setLoc(l){loc=l;store.set('cl_loc',l);$('#dlg').classList.add('hide');load()}
+async function ipFallback(why){
+  try{const r=await(await fetch('https://ipwho.is/')).json();
+    if(!r.success)throw 0;
+    setLoc({name:'Position approximative ('+r.city+')',lat:r.latitude,lon:r.longitude});
+    msg(why+" Position approximative utilisée (ville du réseau, pas ton poste exact) : choisis un lieu précis avec « Lieu ».");
+  }catch(e){msg(why+" Utilise « Lieu » pour chercher ton plan d'eau.")}
+}
+$('#bgps').onclick=()=>{
+  if(!navigator.geolocation){ipFallback("Le GPS n'est pas disponible dans ce navigateur.");return}
+  msg('Recherche de ta position…');
+  navigator.geolocation.getCurrentPosition(p=>setLoc({name:'Position GPS',lat:p.coords.latitude,lon:p.coords.longitude}),
+   e=>{const why=e.code===1?"GPS refusé : autorise la position pour ce site dans Chrome (cadenas, Autorisations), ou ouvre la page directement dans Chrome et non dans l'aperçu d'une application.":e.code===3?"Le GPS met trop de temps à répondre.":"Position indisponible.";ipFallback(why)},
+   {enableHighAccuracy:true,timeout:20000,maximumAge:60000});
+};
+$('#bplace').onclick=()=>{$('#dlg').classList.toggle('hide');favs()};
+function favs(){const F=store.get('cl_favs',[]);$('#favs').innerHTML=F.length?F.map((f,k)=>'<div class="slot"><a href="#" data-u="'+k+'" style="color:var(--g)">'+f.name+'</a><button data-d="'+k+'">Retirer</button></div>').join(''):'Aucun favori.';
+ document.querySelectorAll('[data-u]').forEach(a=>a.onclick=e=>{e.preventDefault();setLoc(F[+a.dataset.u])});
+ document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{F.splice(+b.dataset.d,1);store.set('cl_favs',F);favs()})}
+$('#qgo').onclick=async()=>{
+  const q=$('#q').value.trim();if(!q)return;$('#res').textContent='Recherche…';
+  try{const r=await(await fetch('https://geocoding-api.open-meteo.com/v1/search?count=6&language=fr&name='+encodeURIComponent(q))).json();
+    const R=r.results||[];$('#res').innerHTML=R.length?R.map((x,k)=>'<div class="slot"><a href="#" data-s="'+k+'" style="color:var(--g)">'+x.name+(x.admin1?', '+x.admin1:'')+' ('+x.country_code+')</a><button data-f="'+k+'">Favori</button></div>').join(''):'<p class="mu">Aucun résultat.</p>';
+    const mk=x=>({name:x.name+(x.admin1?', '+x.admin1:''),lat:x.latitude,lon:x.longitude});
+    document.querySelectorAll('[data-s]').forEach(a=>a.onclick=e=>{e.preventDefault();setLoc(mk(R[+a.dataset.s]))});
+    document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{const F=store.get('cl_favs',[]);F.push(mk(R[+b.dataset.f]));store.set('cl_favs',F);favs()});
+  }catch(e){$('#res').innerHTML='<p class="mu">Recherche impossible : vérifie ta connexion.</p>'}};
+$('#q').onkeydown=e=>{if(e.key==='Enter')$('#qgo').click()};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['home','wx','pm'].forEach(v=>$('#v-'+v).classList.toggle('hide',v!==b.dataset.v));window.scrollTo(0,0)});
+renderPm();renderHome();if(loc)load();
+</script>
+</body>
+</html>
